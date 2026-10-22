@@ -1,0 +1,23 @@
+{
+  "blocked_edge": "1101404966#0",
+  "blocked_steps": [
+    45,
+    58
+  ],
+  "vehicles_diverted": 22.0,
+  "vehicles_unrouted": 0.0,
+  "top_receiving_edges": [
+    {
+      "edge_id": "-740848375",
+      "extra_vehicles": 13.169266688231264
+    },
+    {
+      "edge_id": "312645512#0",
+      "extra_vehicles": 5.8485789773519965
+    },
+    {
+      "edge_id": "1101404963#0",
+      "extra_vehicles": 2.982154334416739
+    }
+  ]
+}

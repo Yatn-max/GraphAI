@@ -1,0 +1,15 @@
+{
+  "blocked_edge": "312651884#0",
+  "blocked_steps": [
+    18,
+    22
+  ],
+  "vehicles_diverted": 81.0,
+  "vehicles_unrouted": 0.0,
+  "top_receiving_edges": [
+    {
+      "edge_id": "-981295173#1",
+      "extra_vehicles": 81.0
+    }
+  ]
+}
