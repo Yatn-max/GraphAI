@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disruption replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E6EAE6;
+    --panel: #F8F8F4;
+    --ink: #16262B;
+    --muted: #586868;
+    --line: #D3D9D2;
+    --closure: #D93A2B;
+    --divert: #0C7C8C;
+    --divert-soft: #A9D5DA;
+    --focus: #1B5FD6;
+    --shadow: 0 1px 2px rgba(22, 38, 43, .18), 0 4px 14px rgba(22, 38, 43, .10);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.45; color: var(--ink); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- layout ---------- */
+  #app { display: grid; grid-template-columns: 352px 1fr; grid-template-rows: 1fr auto; height: 100vh; }
+  #panel {
+    grid-row: 1 / 3; background: var(--panel); border-right: 1px solid var(--line);
+    overflow-y: auto; padding: 22px 20px 28px;
+  }
+  #mapwrap { position: relative; min-height: 0; overflow: hidden; background: var(--bg); }
+  #map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #map.dragging { cursor: grabbing; }
+  #timebar {
+    display: flex; align-items: center; gap: 16px; padding: 10px 16px 8px;
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+
+  /* ---------- side panel ---------- */
+  h1 { font-size: 22px; line-height: 1.15; margin: 0 0 2px; letter-spacing: -.01em; }
+  #sub { margin: 0 0 20px; color: var(--muted); }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  #list { list-style: none; margin: 0 0 24px; padding: 0; max-height: 34vh; overflow-y: auto; border-top: 1px solid var(--line); }
+  #list li { border-bottom: 1px solid var(--line); }
+  .sc {
+    display: block; width: 100%; text-align: left; background: none; border: 0; border-left: 4px solid transparent;
+    padding: 9px 10px 9px 12px; cursor: pointer;
+  }
+  .sc:hover { background: #EFF1EC; }
+  .sc[aria-pressed="true"] { background: #fff; border-left-color: var(--closure); }
+  .sc .t { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc .m { display: block; font-size: 12.5px; color: var(--muted); }
+
+  #details h2 { font-size: 17px; margin-bottom: 2px; }
+  #details .when { color: var(--muted); margin: 0 0 14px; }
+  .figures { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+  .figures div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .figures dt { font-size: 12.5px; color: var(--muted); margin: 0; }
+  .figures dd { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.15; }
+  #details p { margin: 0 0 14px; max-width: 60ch; }
+  #details h3 { font-size: 14px; margin: 0 0 6px; }
+  .recv { list-style: none; margin: 0 0 14px; padding: 0; }
+  .recv button {
+    display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid var(--line); padding: 7px 2px; cursor: pointer;
+  }
+  .recv button:hover { background: #EFF1EC; }
+  .recv .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recv small { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .recv .v { color: var(--divert); font-weight: 700; white-space: nowrap; }
+  .note { color: var(--muted); font-size: 12.5px; }
+
+  /* ---------- map overlays ---------- */
+  .float {
+    position: absolute; z-index: 3; background: rgba(255, 255, 255, .94); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  #toolbar { position: absolute; z-index: 3; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; background: none; box-shadow: none; pointer-events: none; }
+  #toolbar > * { pointer-events: auto; }
+  .seg { display: inline-flex; background: rgba(255, 255, 255, .94); border-radius: 10px; box-shadow: var(--shadow); padding: 3px; gap: 2px; }
+  .seg button { border: 0; background: none; padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+  .seg button:hover { background: #EDF0EA; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .check { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 255, 255, .94); border-radius: 10px; box-shadow: var(--shadow); padding: 6px 12px; cursor: pointer; }
+  #legend { right: 12px; top: 58px; padding: 10px 12px; width: 210px; font-size: 12.5px; }
+  #legend .bar { height: 8px; border-radius: 4px; margin: 6px 0 3px; }
+  #legend .ends { display: flex; justify-content: space-between; color: var(--muted); }
+  #legend .key { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+  #legend .swatch { width: 22px; height: 6px; border-radius: 3px; background: var(--closure); box-shadow: 0 0 0 2px var(--ink); }
+  #zoom { right: 12px; bottom: 34px; display: flex; flex-direction: column; overflow: hidden; }
+  #zoom button { width: 36px; height: 36px; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  #zoom button + button { border-top: 1px solid var(--line); }
+  #zoom button:hover { background: #EDF0EA; }
+  #zoom .fit { font-size: 12px; }
+  #attrib { right: 0; bottom: 0; border-radius: 6px 0 0 0; box-shadow: none; padding: 2px 8px; font-size: 11px; color: var(--muted); }
+  #tip {
+    position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 8px;
+    padding: 8px 10px; font-size: 12.5px; max-width: 250px; z-index: 5;
+  }
+  #tip b { display: block; font-size: 13.5px; }
+  #tip .id { color: #A9B7B8; }
+  #tip .r { display: flex; justify-content: space-between; gap: 14px; margin-top: 3px; }
+  #empty { inset: 0; margin: auto; width: min(460px, 90%); height: fit-content; padding: 22px; z-index: 6; }
+  #empty code { background: #EDF0EA; padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- time bar ---------- */
+  #play { min-width: 76px; padding: 9px 14px; border: 0; border-radius: 8px; background: var(--ink); color: #fff; font-weight: 700; cursor: pointer; }
+  #play:hover { background: #2A4048; }
+  #clock { min-width: 108px; }
+  #clock .big { font-size: 22px; font-weight: 700; line-height: 1.1; }
+  #clock .small { font-size: 12.5px; color: var(--muted); }
+  #speed { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 8px; }
+  #chartbox { position: relative; flex: 1; height: 74px; min-width: 0; }
+  #chart { width: 100%; height: 100%; display: block; cursor: ew-resize; touch-action: none; }
+  #chartcap { position: absolute; top: 0; left: 0; font-size: 12px; color: var(--muted); pointer-events: none; }
+
+  @media (max-width: 820px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+    #panel { grid-row: 1; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); padding: 14px; }
+    #list { max-height: 14vh; margin-bottom: 12px; }
+    #legend { display: none; }
+    #panel { max-height: 34vh; }
+    .seg button { padding: 5px 9px; font-size: 13px; }
+    #timebar { flex-wrap: wrap; gap: 10px; }
+    #chartbox { flex-basis: 100%; order: 5; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel" aria-label="Closures">
+    <h1>Disruption replay</h1>
+    <p id="sub"></p>
+    <h2>Closures</h2>
+    <ul id="list"></ul>
+    <section id="details" aria-live="polite"></section>
+  </aside>
+
+  <main id="mapwrap">
+    <canvas id="map" aria-label="Map of the road network showing the closed road and where its traffic goes"></canvas>
+
+    <div id="toolbar">
+      <div class="seg" role="group" aria-label="What to show" id="segView">
+        <button type="button" data-v="diversion" aria-pressed="true">Diversion</button>
+        <button type="button" data-v="traffic" aria-pressed="false">Traffic</button>
+        <button type="button" data-v="congestion" aria-pressed="false">Congestion</button>
+      </div>
+      <div class="seg" role="group" aria-label="Diversion period" id="segScope">
+        <button type="button" data-v="step" aria-pressed="true">This minute</button>
+        <button type="button" data-v="window" aria-pressed="false">Whole closure</button>
+      </div>
+      <div class="seg" role="group" aria-label="Traffic version" id="segWhich" hidden>
+        <button type="button" data-v="normal" aria-pressed="false">Normal</button>
+        <button type="button" data-v="closed" aria-pressed="true">With closure</button>
+      </div>
+      <label class="check" id="baseLabel"><input type="checkbox" id="baseToggle" checked> Basemap</label>
+    </div>
+
+    <div id="legend" class="float" aria-hidden="true"></div>
+    <div id="zoom" class="float">
+      <button type="button" id="zin" aria-label="Zoom in">+</button>
+      <button type="button" id="zout" aria-label="Zoom out">&minus;</button>
+      <button type="button" id="zfit" class="fit" aria-label="Show whole network">All</button>
+    </div>
+    <div id="attrib" class="float">&copy; OpenStreetMap contributors &copy; CARTO</div>
+    <div id="tip" hidden></div>
+    <div id="empty" class="float" hidden>
+      <b>No closures to show yet.</b>
+      <p>Create <code>data.js</code> next to this page by running
+      <code>python build_frontend_data.py --net osm.net.xml.gz --scenarios disruptions --out frontend</code>,
+      then reload.</p>
+    </div>
+  </main>
+
+  <footer id="timebar">
+    <button type="button" id="play">Play</button>
+    <div id="clock" class="num"><div class="big" id="clockBig">0:00</div><div class="small" id="clockSmall"></div></div>
+    <label>Speed
+      <select id="speed">
+        <option value="1">1&times;</option>
+        <option value="2" selected>2&times;</option>
+        <option value="4">4&times;</option>
+      </select>
+    </label>
+    <div id="chartbox">
+      <canvas id="chart" aria-label="Vehicles diverted each minute. Click or drag to change the time."></canvas>
+      <div id="chartcap">Vehicles sent to other roads, per minute</div>
+    </div>
+  </footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+(function () {
+  const D = window.TRAFFIC_DATA;
+  const $ = (s) => document.querySelector(s);
+  if (!D || !D.scenarios || !D.scenarios.length) { $('#empty').hidden = false; $('#panel').hidden = true; return; }
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const E = D.edges.length, T = D.times.length;
+  const dt = T > 1 ? D.times[1] - D.times[0] : 60;
+  const unit = dt === 60 ? 'vehicles per minute' : 'vehicles per step';
+
+  /* ---------------------------------------------------------------- data prep */
+  const TWO = 40075016.68;
+  function toWorld(p) {
+    if (D.geo) {                                     // [lat, lon] -> Web Mercator, 0..1 world units
+      const s = Math.sin(p[0] * Math.PI / 180);
+      return [(p[1] + 180) / 360, 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)];
+    }
+    return [0.5 + p[0] / TWO, 0.5 - p[1] / TWO];     // plain SUMO metres
+  }
+  function midOf(pts) {                              // point halfway along a polyline
+    const seg = []; let L = 0;
+    for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(d); L += d; }
+    let h = L / 2;
+    for (let i = 0; i < seg.length; i++) {
+      if (h <= seg[i]) { const f = seg[i] ? h / seg[i] : 0; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f]; }
+      h -= seg[i];
+    }
+    return pts[0];
+  }
+  let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+  const edges = D.edges.map((e) => {
+    const w = e.pts.map(toWorld);
+    for (const p of w) { minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); miny = Math.min(miny, p[1]); maxy = Math.max(maxy, p[1]); }
+    return { id: e.id, name: e.name, w, mid: midOf(w), s: null };
+  });
+  const allBounds = { minx, miny, maxx, maxy };
+  const label = (i) => edges[i].name || edges[i].id;
+
+  const base = new Float32Array(T * E);
+  for (let t = 0; t < T; t++) for (let e = 0; e < E; e++) base[t * E + e] = D.baseline[t][e];
+  const nz = Array.from(base).filter((v) => v > 0).sort((a, b) => a - b);
+  const trafficMax = Math.max(8, nz.length ? nz[Math.floor(nz.length * 0.98)] : 8);
+
+  const maxOf = (arr, floor) => { let m = floor; for (let i = 0; i < arr.length; i++) if (arr[i] > m) m = arr[i]; return m; };
+  D.scenarios.forEach((sc) => {
+    sc.addedArr = new Float32Array(T * E);
+    sc.cum = new Float32Array(E);
+    sc.perStep = new Float32Array(T);
+    for (const [t, e, v] of sc.added) { sc.addedArr[t * E + e] += v; sc.cum[e] += v; sc.perStep[t] += v; }
+    sc.maxStep = maxOf(sc.addedArr, 1e-9);
+    sc.maxCum = maxOf(sc.cum, 1e-9);
+    sc.maxPerStep = maxOf(sc.perStep, 1);
+  });
+
+  /* ---------------------------------------------------------------- helpers */
+  const fmt = (sec) => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  const stepTime = (t) => D.times[Math.max(0, Math.min(T - 1, t))];
+  const vehicles = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+  function ramp(stops, t) {
+    t = Math.max(0, Math.min(1, t));
+    const n = stops.length - 1, i = Math.min(n - 1, Math.floor(t * n)), f = t * n - i, a = stops[i], b = stops[i + 1];
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' + Math.round(a[1] + (b[1] - a[1]) * f) + ',' + Math.round(a[2] + (b[2] - a[2]) * f) + ')';
+  }
+  const RAMPS = {
+    divert: [[130, 205, 211], [12, 124, 140], [5, 58, 70]],
+    traffic: [[205, 214, 244], [91, 111, 214], [31, 42, 122]],
+    cong: [[63, 163, 77], [242, 194, 48], [232, 116, 43], [179, 32, 42]],
+  };
+  const css = (stops) => 'linear-gradient(90deg,' + stops.map((s) => 'rgb(' + s.join(',') + ')').join(',') + ')';
+
+  /* ---------------------------------------------------------------- state */
+  let cur = null, curIdx = -1;
+  let step = 0, playing = false, speed = 2;
+  let mode = 'diversion', scope = 'step', which = 'closed';
+  let showBase = !!D.geo;
+  let hover = -1, focusEdge = -1, focusUntil = 0;
+  let view = { cx: 0.5, cy: 0.5, z: 12 };
+  let tween = null, dirty = true, animating = false;
+  let W = 0, H = 0, dpr = 1;
+
+  const canvas = $('#map'), ctx = canvas.getContext('2d');
+  const chart = $('#chart'), cx2 = chart.getContext('2d');
+
+  /* ---------------------------------------------------------------- map projection */
+  const scale = () => 256 * Math.pow(2, view.z);
+  const w2s = (x, y) => { const s = scale(); return [(x - view.cx) * s + W / 2, (y - view.cy) * s + H / 2]; };
+  const s2w = (px, py) => { const s = scale(); return [(px - W / 2) / s + view.cx, (py - H / 2) / s + view.cy]; };
+
+  function boundsOf(list) {
+    let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+    for (const i of list) for (const p of edges[i].w) { a = Math.min(a, p[0]); c = Math.max(c, p[0]); b = Math.min(b, p[1]); d = Math.max(d, p[1]); }
+    return { minx: a, miny: b, maxx: c, maxy: d };
+  }
+  function fitTarget(b, pad, maxZ) {
+    const bw = Math.max(b.maxx - b.minx, 1e-9), bh = Math.max(b.maxy - b.miny, 1e-9);
+    const z = Math.log2(Math.min((W - 2 * pad) / (bw * 256), (H - 2 * pad) / (bh * 256)));
+    return { cx: (b.minx + b.maxx) / 2, cy: (b.miny + b.maxy) / 2, z: Math.max(8, Math.min(maxZ, z)) };
+  }
+  function flyTo(t) {
+    if (reduceMotion) { view = { cx: t.cx, cy: t.cy, z: t.z }; tween = null; dirty = true; return; }
+    tween = { t0: performance.now(), dur: 650, from: { cx: view.cx, cy: view.cy, z: view.z }, to: t };
+  }
+
+  /* ---------------------------------------------------------------- basemap tiles */
+  const tiles = new Map();
+  function getTile(z, x, y) {
+    const k = z + '/' + x + '/' + y;
+    let t = tiles.get(k);
+    if (!t) {
+      if (tiles.size > 500) tiles.delete(tiles.keys().next().value);
+      const img = new Image();
+      t = { img, ok: false };
+      img.onload = () => { t.ok = true; dirty = true; };
+      img.onerror = () => { t.failed = true; };
+      img.src = 'https://' + 'abcd'[(x + y) % 4] + '.basemaps.cartocdn.com/light_all/' + z + '/' + x + '/' + y + '.png';
+      tiles.set(k, t);
+    }
+    return t;
+  }
+  function drawTiles() {
+    if (!D.geo || !showBase) return;
+    const zi = Math.max(1, Math.min(19, Math.round(view.z)));
+    const n = Math.pow(2, zi), px = 256 * Math.pow(2, view.z - zi);
+    const a = s2w(0, 0), b = s2w(W, H);
+    const x0 = Math.floor(a[0] * n), x1 = Math.floor(b[0] * n);
+    const y0 = Math.max(0, Math.floor(a[1] * n)), y1 = Math.min(n - 1, Math.floor(b[1] * n));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 120) return;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const t = getTile(zi, ((x % n) + n) % n, y);
+      if (t.ok) { const s = w2s(x / n, y / n); ctx.drawImage(t.img, s[0], s[1], px + 0.6, px + 0.6); }
+    }
+  }
+
+  /* ---------------------------------------------------------------- drawing */
+  function lineWidth() { return Math.max(1.4, Math.min(9, 3 + (view.z - 14) * 1.1)); }
+  function stroke(i, color, width, dash) {
+    const p = edges[i].s;
+    ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]);
+    for (let k = 1; k < p.length; k++) ctx.lineTo(p[k][0], p[k][1]);
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  function visible(i) {
+    for (const p of edges[i].s) if (p[0] > -40 && p[0] < W + 40 && p[1] > -40 && p[1] < H + 40) return true;
+    return false;
+  }
+  function textHalo(txt, x, y) {
+    ctx.font = '700 12px "Atkinson Hyperlegible", system-ui, sans-serif';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.strokeText(txt, x, y);
+    ctx.fillStyle = '#16262B'; ctx.fillText(txt, x, y);
+  }
+  const afterAt = (t, e) => (cur && e === cur.edge && t >= cur.start && t <= cur.end) ? 0 : base[t * E + e] + cur.addedArr[t * E + e];
+
+  function receivers(vals, max, limit) {
+    const out = [];
+    for (let i = 0; i < E; i++) if (vals[i] >= 0.05) out.push(i);   // skip trivial amounts so arrows and labels stay readable
+    out.sort((a, b) => vals[b] - vals[a]);
+    return out.slice(0, limit);
+  }
+
+  function draw(ts) {
+    const rect = canvas.getBoundingClientRect();
+    const nw = Math.round(rect.width), nh = Math.round(rect.height), nd = window.devicePixelRatio || 1;
+    if (nw !== W || nh !== H || nd !== dpr) { W = nw; H = nh; dpr = nd; canvas.width = W * dpr; canvas.height = H * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#E6EAE6'; ctx.fillRect(0, 0, W, H);
+    drawTiles();
+    for (const e of edges) e.s = e.w.map((p) => w2s(p[0], p[1]));
+    const vis = edges.map((_, i) => visible(i));
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const lw = lineWidth(), t = step;
+    let anim = false;
+    const state = !cur ? 'none' : t < cur.start ? 'before' : t <= cur.end ? 'active' : 'after';
+
+    /* roads, coloured by the chosen view */
+    let vals = null, vmax = 1;
+    if (mode === 'diversion') {
+      for (let i = 0; i < E; i++) if (vis[i]) stroke(i, 'rgba(64,82,87,0.38)', lw);
+      if (cur) {
+        vals = scope === 'step' ? cur.addedArr.subarray(t * E, (t + 1) * E) : cur.cum;
+        vmax = scope === 'step' ? cur.maxStep : cur.maxCum;
+        const list = []; for (let i = 0; i < E; i++) if (vals[i] > 0 && vis[i]) list.push(i);
+        list.sort((a, b) => vals[a] - vals[b]);
+        for (const i of list) { const f = vals[i] / vmax; stroke(i, ramp(RAMPS.divert, 0.2 + 0.8 * f), lw * (1.2 + 1.6 * f) + 0.5); }
+      }
+    } else if (mode === 'traffic') {
+      for (let i = 0; i < E; i++) {
+        if (!vis[i]) continue;
+        const v = (which === 'normal' || !cur) ? base[t * E + i] : afterAt(t, i);
+        if (v > 0) { const f = Math.min(1, v / trafficMax); stroke(i, ramp(RAMPS.traffic, f), lw * (1 + 0.8 * f)); }
+        else stroke(i, 'rgba(110,125,128,0.28)', lw * 0.8);
+      }
+    } else if (cur) {
+      for (let i = 0; i < E; i++) if (vis[i]) stroke(i, ramp(RAMPS.cong, (cur.weights[i] - 0.1) / 0.8), lw * 1.3);
+    }
+
+    /* the closed road */
+    if (cur) {
+      const b = cur.edge;
+      if (state === 'active') {
+        stroke(b, '#16262B', lw * 2.4 + 3);
+        stroke(b, '#D93A2B', lw * 2 + 1.5);
+        stroke(b, '#fff', Math.max(1.5, lw * 0.5), [5, 7]);
+      } else if (state === 'before') {
+        stroke(b, 'rgba(217,58,43,0.9)', lw * 1.1, [6, 5]);
+      } else {
+        stroke(b, 'rgba(217,58,43,0.5)', lw * 1.1, [2, 6]);
+      }
+    }
+
+    /* arrows from the closed road to the roads that take its traffic */
+    if (mode === 'diversion' && cur && vals && (state === 'active' || scope === 'window')) {
+      const m = w2s(edges[cur.edge].mid[0], edges[cur.edge].mid[1]);
+      const list = receivers(vals, vmax, 12);
+      for (const i of list) {
+        const q = w2s(edges[i].mid[0], edges[i].mid[1]);
+        const dx = q[0] - m[0], dy = q[1] - m[1], len = Math.hypot(dx, dy);
+        if (len < 4) continue;
+        const cxp = (m[0] + q[0]) / 2 - dy * 0.22, cyp = (m[1] + q[1]) / 2 + dx * 0.22;
+        const f = vals[i] / vmax;
+        ctx.beginPath(); ctx.moveTo(m[0], m[1]); ctx.quadraticCurveTo(cxp, cyp, q[0], q[1]);
+        ctx.strokeStyle = 'rgba(5,58,70,0.9)'; ctx.lineWidth = 1.6 + 2.4 * f;
+        ctx.setLineDash([9, 9]); ctx.lineDashOffset = reduceMotion ? 0 : -(ts / 35);
+        ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+        const ang = Math.atan2(q[1] - cyp, q[0] - cxp);
+        ctx.beginPath(); ctx.moveTo(q[0], q[1]);
+        ctx.lineTo(q[0] - 10 * Math.cos(ang - 0.45), q[1] - 10 * Math.sin(ang - 0.45));
+        ctx.lineTo(q[0] - 10 * Math.cos(ang + 0.45), q[1] - 10 * Math.sin(ang + 0.45));
+        ctx.closePath(); ctx.fillStyle = 'rgba(5,58,70,0.95)'; ctx.fill();
+      }
+      if (state === 'active' && !reduceMotion) anim = true;
+    }
+
+    /* hover and "show on map" highlight */
+    if (hover >= 0 && vis[hover]) { stroke(hover, '#fff', lw * 2 + 4); stroke(hover, '#16262B', lw * 1.2 + 1); }
+    if (focusEdge >= 0 && ts < focusUntil) {
+      const pulse = reduceMotion ? 1 : 0.55 + 0.45 * Math.sin(ts / 160);
+      stroke(focusEdge, 'rgba(27,95,214,' + (0.35 * pulse + 0.2) + ')', lw * 4 + 6);
+      stroke(focusEdge, '#1B5FD6', lw * 1.4 + 1);
+      anim = true;
+    }
+
+    /* closure marker */
+    if (cur) {
+      const m = w2s(edges[cur.edge].mid[0], edges[cur.edge].mid[1]);
+      const r = 11;
+      if (state === 'active' && !reduceMotion) {
+        const k = (ts % 1400) / 1400;
+        ctx.beginPath(); ctx.arc(m[0], m[1], r + 20 * k, 0, 6.2832);
+        ctx.strokeStyle = 'rgba(217,58,43,' + (0.55 * (1 - k)) + ')'; ctx.lineWidth = 3; ctx.stroke();
+        anim = true;
+      }
+      ctx.beginPath(); ctx.arc(m[0], m[1], r, 0, 6.2832);
+      ctx.fillStyle = state === 'active' ? '#D93A2B' : '#fff'; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = state === 'active' ? '#fff' : '#D93A2B'; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(m[0] - 4.5, m[1] - 4.5); ctx.lineTo(m[0] + 4.5, m[1] + 4.5); ctx.moveTo(m[0] + 4.5, m[1] - 4.5); ctx.lineTo(m[0] - 4.5, m[1] + 4.5);
+      ctx.strokeStyle = state === 'active' ? '#fff' : '#D93A2B'; ctx.lineWidth = 2.2; ctx.stroke();
+
+      if (view.z >= 14.3) {                                            // road names once zoomed in
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        textHalo(label(cur.edge), m[0] + 17, m[1]);
+        if (mode === 'diversion' && vals) for (const i of receivers(vals, vmax, 5)) {
+          const q = w2s(edges[i].mid[0], edges[i].mid[1]);
+          textHalo(label(i) + '  +' + vehicles(vals[i]), q[0] + 8, q[1] - 10);
+        }
+      }
+    }
+    animating = anim;
+  }
+
+  /* ---------------------------------------------------------------- chart / scrubber */
+  function drawChart() {
+    const r = chart.getBoundingClientRect(), w = Math.round(r.width), h = Math.round(r.height), d = window.devicePixelRatio || 1;
+    if (!w || !h) return;
+    if (chart.width !== w * d || chart.height !== h * d) { chart.width = w * d; chart.height = h * d; }
+    cx2.setTransform(d, 0, 0, d, 0, 0); cx2.clearRect(0, 0, w, h);
+    const axisY = h - 17, top = 18, bw = w / T;
+    if (cur) {
+      cx2.fillStyle = 'rgba(217,58,43,0.13)'; cx2.fillRect(cur.start * bw, 0, (cur.end - cur.start + 1) * bw, axisY);
+      for (let t = 0; t < T; t++) {
+        const v = cur.perStep[t]; if (v <= 0) continue;
+        const bh = Math.max(2, (axisY - top) * v / cur.maxPerStep);
+        cx2.fillStyle = t <= step ? '#0C7C8C' : '#A9D5DA';
+        cx2.fillRect(t * bw + 0.5, axisY - bh, Math.max(1, bw - 1), bh);
+      }
+    }
+    cx2.fillStyle = '#16262B'; cx2.fillRect(0, axisY, w, 1);
+    cx2.font = '12px "Atkinson Hyperlegible", system-ui, sans-serif'; cx2.fillStyle = '#586868'; cx2.textBaseline = 'alphabetic';
+    cx2.textAlign = 'left'; cx2.fillText(fmt(D.times[0]), 0, h - 3);
+    cx2.textAlign = 'center'; cx2.fillText(fmt(D.times[Math.floor(T / 2)]), w / 2, h - 3);
+    cx2.textAlign = 'right'; cx2.fillText(fmt(D.times[T - 1]), w, h - 3);
+    const x = (step + 0.5) * bw;
+    cx2.fillStyle = '#16262B'; cx2.fillRect(x - 1, 0, 2, axisY);
+    cx2.beginPath(); cx2.arc(x, axisY, 5, 0, 6.2832); cx2.fill();
+  }
+
+  /* ---------------------------------------------------------------- panel / legend / clock */
+  function renderList() {
+    $('#sub').textContent = D.scenarios.length + (D.scenarios.length === 1 ? ' closure' : ' closures') + ' on ' + E + ' roads';
+    const ul = $('#list'); ul.innerHTML = '';
+    D.scenarios.forEach((sc, i) => {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.className = 'sc'; b.setAttribute('aria-pressed', 'false');
+      b.innerHTML = '<span class="t"></span><span class="m num"></span>';
+      b.querySelector('.t').textContent = '#' + String(sc.id).padStart(3, '0') + '  ' + label(sc.edge);
+      b.querySelector('.m').textContent = fmt(stepTime(sc.start)) + '\u2013' + fmt(stepTime(sc.end)) + ' \u00b7 ' + vehicles(sc.diverted) + ' vehicles diverted';
+      b.addEventListener('click', () => selectScenario(i));
+      li.appendChild(b); ul.appendChild(li);
+    });
+  }
+  function renderDetails() {
+    const el = $('#details');
+    if (!cur) { el.innerHTML = ''; return; }
+    const e = edges[cur.edge];
+    el.innerHTML =
+      '<h2></h2><p class="when num"></p>' +
+      '<dl class="figures num"><div><dt>Vehicles diverted</dt><dd class="a"></dd></div><div><dt>Not rerouted</dt><dd class="b"></dd></div></dl>' +
+      '<p>Vehicles that would have entered this road were sent to the other exits at the junctions that feed it. ' +
+      'The lower a road\u2019s predicted weight, the bigger its share.</p>' +
+      '<h3>Roads that took the most extra traffic</h3><ul class="recv"></ul>' +
+      '<p class="note">Weights were predicted before the closure began and are not updated afterwards.</p>';
+    el.querySelector('h2').textContent = 'Closed: ' + label(cur.edge);
+    el.querySelector('.when').textContent = (e.name ? 'Road ' + e.id + ' \u00b7 ' : '') + 'from ' + fmt(stepTime(cur.start)) + ' to ' + fmt(stepTime(cur.end));
+    el.querySelector('.a').textContent = vehicles(cur.diverted);
+    el.querySelector('.b').textContent = vehicles(cur.unrouted);
+    const ul = el.querySelector('.recv');
+    if (!cur.top.length) { const li = document.createElement('li'); li.className = 'note'; li.textContent = 'No traffic was moved in this scenario.'; ul.appendChild(li); }
+    cur.top.forEach(([i, v]) => {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.innerHTML = '<span class="name"></span><span class="v num"></span>';
+      b.querySelector('.name').innerHTML = '<span></span><small></small>';
+      b.querySelector('.name span').textContent = label(i);
+      b.querySelector('.name small').textContent = edges[i].name ? edges[i].id : '';
+      b.querySelector('.v').textContent = '+' + vehicles(v);
+      b.addEventListener('click', () => showEdge(i));
+      li.appendChild(b); ul.appendChild(li);
+    });
+  }
+  function renderLegend() {
+    const L = $('#legend'); let html = '';
+    if (mode === 'diversion') {
+      const mx = cur ? (scope === 'step' ? cur.maxStep : cur.maxCum) : 0;
+      html = '<div>Extra vehicles received' + (scope === 'step' ? ' this minute' : ' during the closure') + '</div>' +
+        '<div class="bar" style="background:' + css(RAMPS.divert) + '"></div><div class="ends num"><span>0</span><span>' + vehicles(mx) + '</span></div>';
+    } else if (mode === 'traffic') {
+      html = '<div>Vehicles entering each road</div><div class="bar" style="background:' + css(RAMPS.traffic) + '"></div>' +
+        '<div class="ends num"><span>0</span><span>' + Math.round(trafficMax) + '+ ' + (dt === 60 ? 'per min' : 'per step') + '</span></div>';
+    } else {
+      html = '<div>Predicted congestion weight</div><div class="bar" style="background:' + css(RAMPS.cong) + '"></div>' +
+        '<div class="ends"><span>Free-flowing</span><span>Jammed</span></div>';
+    }
+    html += '<div class="key"><span class="swatch"></span><span>Closed road</span></div>';
+    L.innerHTML = html;
+  }
+  function updateClock() {
+    $('#clockBig').textContent = fmt(stepTime(step));
+    let s = 'Step ' + step + ' of ' + (T - 1);
+    if (cur) s += step < cur.start ? ' \u00b7 before closure' : step <= cur.end ? ' \u00b7 road closed' : ' \u00b7 reopened';
+    $('#clockSmall').textContent = s;
+  }
+  function setStep(n) { step = Math.max(0, Math.min(T - 1, n)); dirty = true; updateClock(); drawChart(); }
+  function setPlaying(p) {
+    playing = p; $('#play').textContent = p ? 'Pause' : 'Play';
+    if (p && step >= T - 1) setStep(cur ? cur.start : 0);
+  }
+
+  /* ---------------------------------------------------------------- actions */
+  function selectScenario(i, instant) {
+    curIdx = i; cur = D.scenarios[i];
+    document.querySelectorAll('.sc').forEach((b, k) => b.setAttribute('aria-pressed', k === i ? 'true' : 'false'));
+    setPlaying(false); setStep(cur.start);
+    renderDetails(); renderLegend();
+    const list = [cur.edge].concat(cur.top.map((x) => x[0]));
+    const target = fitTarget(boundsOf(list), 140, 16.5);
+    if (instant) { view = target; dirty = true; } else flyTo(target);
+  }
+  function showEdge(i) {
+    focusEdge = i; focusUntil = performance.now() + 2600; dirty = true;
+    const b = boundsOf([i, cur.edge]);
+    flyTo(fitTarget(b, 120, 16.5));
+  }
+  function setMode(v) {
+    mode = v;
+    document.querySelectorAll('#segView button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.v === v ? 'true' : 'false'));
+    $('#segScope').hidden = v !== 'diversion'; $('#segWhich').hidden = v !== 'traffic';
+    renderLegend(); dirty = true;
+  }
+  function wireSeg(id, set) {
+    document.querySelectorAll(id + ' button').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll(id + ' button').forEach((o) => o.setAttribute('aria-pressed', o === b ? 'true' : 'false'));
+      set(b.dataset.v); renderLegend(); dirty = true;
+    }));
+  }
+  document.querySelectorAll('#segView button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.v)));
+  wireSeg('#segScope', (v) => { scope = v; });
+  wireSeg('#segWhich', (v) => { which = v; });
+  if (!D.geo) { $('#baseLabel').hidden = true; $('#attrib').hidden = true; }
+  $('#baseToggle').addEventListener('change', (e) => { showBase = e.target.checked; $('#attrib').hidden = !showBase; dirty = true; });
+  $('#play').addEventListener('click', () => setPlaying(!playing));
+  $('#speed').addEventListener('change', (e) => { speed = +e.target.value; });
+  $('#zin').addEventListener('click', () => flyTo({ cx: view.cx, cy: view.cy, z: Math.min(19, view.z + 1) }));
+  $('#zout').addEventListener('click', () => flyTo({ cx: view.cx, cy: view.cy, z: Math.max(8, view.z - 1) }));
+  $('#zfit').addEventListener('click', () => flyTo(fitTarget(allBounds, 40, 16)));
+
+  /* ---------------------------------------------------------------- map interaction */
+  let drag = null;
+  canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY }; tween = null; canvas.classList.add('dragging'); $('#tip').hidden = true; });
+  canvas.addEventListener('pointerup', (e) => { drag = null; canvas.classList.remove('dragging'); });
+  canvas.addEventListener('pointermove', (e) => {
+    const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (drag) {
+      const s = scale(); view.cx -= (e.clientX - drag.x) / s; view.cy -= (e.clientY - drag.y) / s;
+      drag.x = e.clientX; drag.y = e.clientY; dirty = true; return;
+    }
+    let best = -1, bd = 9;
+    for (let i = 0; i < E; i++) {
+      const p = edges[i].s; if (!p) continue;
+      for (let k = 1; k < p.length; k++) {
+        const ax = p[k - 1][0], ay = p[k - 1][1], bx = p[k][0], by = p[k][1], vx = bx - ax, vy = by - ay;
+        const l2 = vx * vx + vy * vy, f = l2 ? Math.max(0, Math.min(1, ((mx - ax) * vx + (my - ay) * vy) / l2)) : 0;
+        const d = Math.hypot(mx - (ax + f * vx), my - (ay + f * vy));
+        if (d < bd) { bd = d; best = i; }
+      }
+    }
+    if (best !== hover) { hover = best; dirty = true; }
+    showTip(best, mx, my);
+  });
+  ['#toolbar', '#legend', '#zoom'].forEach((q) => $(q).addEventListener('pointerenter', () => { hover = -1; $('#tip').hidden = true; dirty = true; }));
+  canvas.addEventListener('pointerleave', () => { hover = -1; $('#tip').hidden = true; dirty = true; });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault(); tween = null;
+    const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const before = s2w(mx, my);
+    view.z = Math.max(8, Math.min(19, view.z - e.deltaY * 0.0016));
+    const after = s2w(mx, my);
+    view.cx += before[0] - after[0]; view.cy += before[1] - after[1]; dirty = true;
+  }, { passive: false });
+
+  function showTip(i, mx, my) {
+    const tip = $('#tip');
+    if (i < 0) { tip.hidden = true; return; }
+    const e = edges[i]; let rows = '';
+    const row = (k, v) => '<div class="r num"><span>' + k + '</span><span>' + v + '</span></div>';
+    if (cur) {
+      const closed = i === cur.edge && step >= cur.start && step <= cur.end;
+      const norm = base[step * E + i], aft = afterAt(step, i), extra = cur.addedArr[step * E + i];
+      if (closed) rows += '<div class="r"><span>Closed</span></div>';
+      rows += row('Normal', vehicles(norm)) + row('With closure', vehicles(aft));
+      if (extra > 0) rows += row('Extra', '+' + vehicles(extra));
+      rows += row('Weight', cur.weights[i].toFixed(2));
+    }
+    tip.innerHTML = '<b></b><span class="id"></span>' + rows;
+    tip.querySelector('b').textContent = e.name || e.id;
+    tip.querySelector('.id').textContent = e.name ? e.id : unit;
+    tip.hidden = false;
+    const wrap = $('#mapwrap').getBoundingClientRect();
+    tip.style.left = Math.min(wrap.width - 260, mx + 16) + 'px';
+    tip.style.top = Math.min(wrap.height - tip.offsetHeight - 8, my + 16) + 'px';
+  }
+
+  /* chart scrubbing */
+  let scrub = false;
+  const stepFromChart = (e) => { const r = chart.getBoundingClientRect(); setStep(Math.floor((e.clientX - r.left) / r.width * T)); };
+  chart.addEventListener('pointerdown', (e) => { chart.setPointerCapture(e.pointerId); scrub = true; setPlaying(false); stepFromChart(e); });
+  chart.addEventListener('pointermove', (e) => { if (scrub) stepFromChart(e); });
+  chart.addEventListener('pointerup', () => { scrub = false; });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('select, input')) return;
+    if (e.key === ' ' && !e.target.matches('button')) { e.preventDefault(); setPlaying(!playing); }
+    else if (e.key === 'ArrowRight') { setPlaying(false); setStep(step + 1); }
+    else if (e.key === 'ArrowLeft') { setPlaying(false); setStep(step - 1); }
+  });
+
+  /* ---------------------------------------------------------------- main loop */
+  let last = 0, acc = 0;
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    if (tween) {
+      const k = Math.min(1, (ts - tween.t0) / tween.dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      view.cx = tween.from.cx + (tween.to.cx - tween.from.cx) * e;
+      view.cy = tween.from.cy + (tween.to.cy - tween.from.cy) * e;
+      view.z = tween.from.z + (tween.to.z - tween.from.z) * e;
+      if (k >= 1) tween = null;
+      dirty = true;
+    }
+    if (playing) {
+      acc += ts - last;
+      const per = 600 / speed;
+      while (acc >= per) { acc -= per; if (step >= T - 1) { setPlaying(false); break; } setStep(step + 1); }
+    } else acc = 0;
+    last = ts;
+    if (focusEdge >= 0 && ts >= focusUntil) { focusEdge = -1; dirty = true; }
+    if (dirty || animating) { dirty = false; draw(ts); }
+  }
+
+  new ResizeObserver(() => { dirty = true; drawChart(); }).observe($('#mapwrap'));
+  new ResizeObserver(() => drawChart()).observe($('#chartbox'));
+
+  renderList();
+  setMode('diversion');
+  draw(0);                                                    // measure the canvas before fitting
+  view = fitTarget(allBounds, 40, 16);
+  selectScenario(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
